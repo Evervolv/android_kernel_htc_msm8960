@@ -56,6 +56,7 @@ static struct vsycn_ctrl {
 	int wait_vsync_cnt;
 	int blt_change;
 	int blt_free;
+	int blt_ctrl;
 	int sysfs_created;
 	struct mutex update_lock;
 	struct completion ov_comp;
@@ -500,9 +501,11 @@ int mdp4_dsi_video_on(struct platform_device *pdev)
 	int ret = 0;
 	int cndx = 0;
 	struct vsycn_ctrl *vctrl;
+	struct msm_panel_info *pinfo;
 
 	vctrl = &vsync_ctrl_db[cndx];
 	mfd = (struct msm_fb_data_type *)platform_get_drvdata(pdev);
+	pinfo = &mfd->panel_info;
 
 	if (!mfd)
 		return -ENODEV;
@@ -512,6 +515,7 @@ int mdp4_dsi_video_on(struct platform_device *pdev)
 
 	vctrl->mfd = mfd;
 	vctrl->dev = mfd->fbi->dev;
+	vctrl->blt_ctrl = pinfo->lcd.blt_ctrl;
 
 	/* mdp clock on */
 	mdp_clk_ctrl(1);
@@ -568,14 +572,10 @@ int mdp4_dsi_video_on(struct platform_device *pdev)
 	pipe->srcp0_ystride = fbi->fix.line_length;
 	pipe->bpp = bpp;
 
-	if (mfd->map_buffer) {
-		pipe->srcp0_addr = (unsigned int)mfd->map_buffer->iova[0] + \
-			buf_offset;
-			pr_debug("start 0x%lx srcp0_addr 0x%x\n", mfd->
-				map_buffer->iova[0], pipe->srcp0_addr);
-	} else {
+	if (mfd->display_iova)
+		pipe->srcp0_addr = mfd->display_iova + buf_offset;
+	else
 		pipe->srcp0_addr = (uint32)(buf + buf_offset);
-	}
 
 	pipe->dst_h = fbi->var.yres;
 	pipe->dst_w = fbi->var.xres;
@@ -707,11 +707,21 @@ int mdp4_dsi_video_off(struct platform_device *pdev)
 			mdp4_dsi_video_wait4ov(0);
 	}
 
+	mdp_histogram_ctrl_all(FALSE);
+
 	MDP_OUTP(MDP_BASE + DSI_VIDEO_BASE, 0);
 
 	dsi_video_enabled = 0;
 
-	mdp_histogram_ctrl_all(FALSE);
+	undx =  vctrl->update_ndx;
+	vp = &vctrl->vlist[undx];
+	if (vp->update_cnt) {
+		/*
+		 * pipe's iommu will be freed at next overlay play
+		 * and iommu_drop statistic will be increased by one
+		 */
+		vp->update_cnt = 0;     /* empty queue */
+	}
 
 	undx =  vctrl->update_ndx;
 	vp = &vctrl->vlist[undx];
@@ -831,14 +841,10 @@ void mdp4_dsi_video_3d_sbys(struct msm_fb_data_type *mfd,
 	pipe->dst_y = 0;
 	pipe->dst_x = 0;
 
-	if (mfd->map_buffer) {
-		pipe->srcp0_addr = (unsigned int)mfd->map_buffer->iova[0] + \
-			buf_offset;
-		pr_debug("start 0x%lx srcp0_addr 0x%x\n", mfd->
-			map_buffer->iova[0], pipe->srcp0_addr);
-	} else {
+	if (mfd->display_iova)
+		pipe->srcp0_addr = mfd->display_iova + buf_offset;
+	else
 		pipe->srcp0_addr = (uint32)(buf + buf_offset);
-	}
 
 	mdp4_overlay_rgb_setup(pipe);
 
@@ -1054,8 +1060,34 @@ static void mdp4_dsi_video_do_blt(struct msm_fb_data_type *mfd, int enable)
 		spin_unlock_irqrestore(&vctrl->spin_lock, flag);
 		return;
 	}
-
 	spin_unlock_irqrestore(&vctrl->spin_lock, flag);
+
+	if (vctrl->blt_ctrl == OVERLAY_BLT_SWITCH_TG_OFF) {
+		int tg_enabled;
+		long long  vtime;
+
+		pr_info("%s: blt enabled by switching TG off\n", __func__);
+		vctrl->blt_change = 0;
+		tg_enabled = inpdw(MDP_BASE + DSI_VIDEO_BASE) & 0x01;
+		if (tg_enabled) {
+			mdp4_dsi_video_wait4vsync(0, &vtime);
+			MDP_OUTP(MDP_BASE + DSI_VIDEO_BASE, 0);
+			mdp4_dsi_video_wait4dmap_done(0);
+		}
+		mdp4_overlayproc_cfg(pipe);
+		mdp4_overlay_dmap_xy(pipe);
+		if (tg_enabled) {
+			/*
+			 * need wait for more than 1 ms to
+			 * make sure lanes' fifo is empty and
+			 * lanes in stop state befroe reset
+			 * controller
+			 */
+			usleep(2000);
+			mipi_dsi_sw_reset();
+			MDP_OUTP(MDP_BASE + DSI_VIDEO_BASE, 1);
+		}
+	}
 }
 
 void mdp4_dsi_video_overlay_blt(struct msm_fb_data_type *mfd,
@@ -1101,10 +1133,9 @@ void mdp4_dsi_video_overlay(struct msm_fb_data_type *mfd)
 		buf = (uint8 *) fbi->fix.smem_start;
 		buf_offset = calc_fb_offset(mfd, fbi, bpp);
 
-		if (mfd->map_buffer->iova[0]) {
-			pipe->srcp0_addr = mfd->map_buffer->iova[0]
-				+ buf_offset;
-		} else
+		if (mfd->display_iova)
+			pipe->srcp0_addr = mfd->display_iova + buf_offset;
+		else
 			pipe->srcp0_addr = (uint32)(buf + buf_offset);
 
 		mdp4_dsi_video_pipe_queue(0, pipe);
@@ -1124,4 +1155,3 @@ void mdp4_dsi_video_overlay(struct msm_fb_data_type *mfd)
 	mdp4_overlay_mdp_perf_upd(mfd, 0);
 	mutex_unlock(&mfd->dma->ov_mutex);
 }
-

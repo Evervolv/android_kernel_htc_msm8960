@@ -1,4 +1,4 @@
-/* Copyright (c) 2010-2011, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2010-2012, Code Aurora Forum. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -156,7 +156,7 @@ static int msm_iommu_probe(struct platform_device *pdev)
 		goto fail;
 	}
 
-	ret = clk_enable(iommu_pclk);
+	ret = clk_prepare_enable(iommu_pclk);
 	if (ret)
 		goto fail_enable;
 
@@ -168,7 +168,7 @@ static int msm_iommu_probe(struct platform_device *pdev)
 			clk_set_rate(iommu_clk, ret);
 		}
 
-		ret = clk_enable(iommu_clk);
+		ret = clk_prepare_enable(iommu_clk);
 		if (ret) {
 			clk_put(iommu_clk);
 			goto fail_pclk;
@@ -224,6 +224,7 @@ static int msm_iommu_probe(struct platform_device *pdev)
 	drvdata->clk = iommu_clk;
 	drvdata->base = regs_base;
 	drvdata->ncb = iommu_dev->ncb;
+	drvdata->ttbr_split = iommu_dev->ttbr_split;
 	drvdata->name = iommu_dev->name;
 
 	pr_info("device %s mapped at %p, with %d ctx banks\n",
@@ -232,9 +233,9 @@ static int msm_iommu_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, drvdata);
 
 	if (iommu_clk)
-		clk_disable(iommu_clk);
+		clk_disable_unprepare(iommu_clk);
 
-	clk_disable(iommu_pclk);
+	clk_disable_unprepare(iommu_pclk);
 
 	return 0;
 fail_io:
@@ -243,11 +244,11 @@ fail_mem:
 	release_mem_region(r->start, len);
 fail_clk:
 	if (iommu_clk) {
-		clk_disable(iommu_clk);
+		clk_disable_unprepare(iommu_clk);
 		clk_put(iommu_clk);
 	}
 fail_pclk:
-	clk_disable(iommu_pclk);
+	clk_disable_unprepare(iommu_pclk);
 fail_enable:
 	clk_put(iommu_pclk);
 fail:
@@ -317,14 +318,14 @@ static int msm_iommu_ctx_probe(struct platform_device *pdev)
 	INIT_LIST_HEAD(&ctx_drvdata->attached_elm);
 	platform_set_drvdata(pdev, ctx_drvdata);
 
-	ret = clk_enable(drvdata->pclk);
+	ret = clk_prepare_enable(drvdata->pclk);
 	if (ret)
 		goto fail;
 
 	if (drvdata->clk) {
-		ret = clk_enable(drvdata->clk);
+		ret = clk_prepare_enable(drvdata->clk);
 		if (ret) {
-			clk_disable(drvdata->pclk);
+			clk_disable_unprepare(drvdata->pclk);
 			goto fail;
 		}
 	}
@@ -359,8 +360,8 @@ static int msm_iommu_ctx_probe(struct platform_device *pdev)
 	mb();
 
 	if (drvdata->clk)
-		clk_disable(drvdata->clk);
-	clk_disable(drvdata->pclk);
+		clk_disable_unprepare(drvdata->clk);
+	clk_disable_unprepare(drvdata->pclk);
 
 	dev_info(&pdev->dev, "context %s using bank %d\n", c->name, c->num);
 	return 0;

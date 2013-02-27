@@ -2293,9 +2293,9 @@ static struct dsi_cmd_desc auo_panel_video_mode_cmds_c3[] = {
 	/* NVT: Enable vivid-color, and enable CABC Moving-Mode, please set register(55h) as 0x83 */
 	{DTYPE_DCS_WRITE1, 1, 0, 0, 0, 2, (char[]){0x55,0x83}},
 
-
 	/* {DTYPE_DCS_WRITE, 1, 0, 0, 150, sizeof(exit_sleep), exit_sleep}, */
 	{DTYPE_DCS_WRITE1, 1, 0, 0, 0, 2, (char[]){0x53, 0x24}},
+	{DTYPE_DCS_WRITE, 1, 0, 0, 40, sizeof(display_on), display_on},
 };
 static struct dsi_cmd_desc auo_panel_video_mode_cmds_c3_1[] = {
 	{DTYPE_DCS_WRITE1, 1, 0, 0, 0, sizeof(set_threelane), set_threelane},
@@ -2914,7 +2914,7 @@ void enable_ic_cabc(int cabc, bool dim_on, struct msm_fb_data_type *mfd)
 	mutex_lock(&mfd->dma->ov_mutex);
 
 	if (mfd && mfd->panel_info.type == MIPI_CMD_PANEL) {
-		mipi_dsi_mdp_busy_wait(mfd);
+		mipi_dsi_mdp_busy_wait();
 	}
 	/*mipi_dsi_cmds_tx(mfd, &jet_panel_tx_buf, cabc_cmds, ARRAY_SIZE(cabc_on_ui));*/
 	mipi_dsi_cmds_tx(&jet_panel_tx_buf, dim_cmds, ARRAY_SIZE(enable_dim));
@@ -3092,7 +3092,7 @@ static void jet_set_backlight(struct msm_fb_data_type *mfd)
 
 	led_pwm1[1] = jet_shrink_pwm(mfd->bl_level);
 
-	mipi_dsi_mdp_busy_wait(mfd);
+	mipi_dsi_mdp_busy_wait();
 
 	if (mfd->bl_level == 0) {
 		mipi_dsi_cmds_tx(&jet_panel_tx_buf, disable_dim,

@@ -536,14 +536,11 @@ int mdp4_lcdc_on(struct platform_device *pdev)
 	pipe->src_x = 0;
 	pipe->dst_h = fbi->var.yres;
 	pipe->dst_w = fbi->var.xres;
-	if (mfd->map_buffer) {
-		pipe->srcp0_addr = (unsigned int)mfd->map_buffer->iova[0] + \
-			buf_offset;
-		pr_debug("start 0x%lx srcp0_addr 0x%x\n", mfd->
-			map_buffer->iova[0], pipe->srcp0_addr);
-	} else {
+
+	if (mfd->display_iova)
+		pipe->srcp0_addr = mfd->display_iova + buf_offset;
+	else
 		pipe->srcp0_addr = (uint32)(buf + buf_offset);
-	}
 
 	pipe->srcp0_ystride = fbi->fix.line_length;
 	pipe->bpp = bpp;
@@ -678,11 +675,21 @@ int mdp4_lcdc_off(struct platform_device *pdev)
 			mdp4_lcdc_wait4ov(0);
 	}
 
+	mdp_histogram_ctrl_all(FALSE);
+
 	MDP_OUTP(MDP_BASE + LCDC_BASE, 0);
 
 	lcdc_enabled = 0;
 
-	mdp_histogram_ctrl_all(FALSE);
+	undx =  vctrl->update_ndx;
+	vp = &vctrl->vlist[undx];
+	if (vp->update_cnt) {
+		/*
+		 * pipe's iommu will be freed at next overlay play
+		 * and iommu_drop statistic will be increased by one
+		 */
+		vp->update_cnt = 0;     /* empty queue */
+	}
 
 	undx =  vctrl->update_ndx;
 	vp = &vctrl->vlist[undx];
@@ -948,10 +955,9 @@ void mdp4_lcdc_overlay(struct msm_fb_data_type *mfd)
 		buf = (uint8 *) fbi->fix.smem_start;
 		buf_offset = calc_fb_offset(mfd, fbi, bpp);
 
-		if (mfd->map_buffer->iova[0]) {
-			pipe->srcp0_addr = mfd->map_buffer->iova[0]
-				+ buf_offset;
-		} else
+		if (mfd->display_iova)
+			pipe->srcp0_addr = mfd->display_iova + buf_offset;
+		else
 			pipe->srcp0_addr = (uint32)(buf + buf_offset);
 
 		mdp4_lcdc_pipe_queue(0, pipe);
