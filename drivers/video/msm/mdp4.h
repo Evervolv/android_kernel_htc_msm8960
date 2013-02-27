@@ -33,7 +33,6 @@ extern u64 mdp_max_bw;
 #define MDP4_BW_IB_FACTOR (125) /* 1.25 */
 
 #define MDP_BUS_SCALE_AB_STEP (0x4000000)
-#define MDP_BUS_SCALE_INIT (0x10000000)
 
 #define MDP4_OVERLAYPROC0_BASE	0x10000
 #define MDP4_OVERLAYPROC1_BASE	0x18000
@@ -371,7 +370,6 @@ struct mdp4_overlay_pipe {
 	uint32 blt_ov_done;
 	uint32 blt_dmap_koff;
 	uint32 blt_dmap_done;
-	uint32 blt_forced;
 	uint32 req_clk;
 	uint64 bw_ab_quota;
 	uint64 bw_ib_quota;

@@ -2509,7 +2509,7 @@ static int mipi_video_sony_hd720p_init(void)
 #endif
 		pinfo.lcd.vsync_enable = TRUE;
 		pinfo.lcd.hw_vsync_mode = TRUE;
-		pinfo.lcd.refx100 = 6096; /* adjust refx100 to prevent tearing */
+		pinfo.lcd.refx100 = 6650; /* adjust refx100 to prevent tearing */
 		pinfo.mipi.te_sel = 1; /* TE from vsycn gpio */
 		pinfo.mipi.interleave_max = 1;
 		pinfo.mipi.insert_dcs_cmd = TRUE;
@@ -2563,7 +2563,6 @@ static int mipi_video_sony_hd720p_init(void)
 	pinfo.bl_max = 255;
 	pinfo.bl_min = 1;
 	pinfo.fb_num = 2;
-	pinfo.lcd.blt_ctrl = 1;
 
 	pinfo.clk_rate = 569000000;
 
@@ -2642,7 +2641,6 @@ static int __init mipi_video_himax_720p_pt_init(void)
 	pinfo.bl_max = 255;
 	pinfo.bl_min = 1;
 	pinfo.fb_num = 2;
-	pinfo.lcd.blt_ctrl = 1;
 
 	pinfo.clk_rate = 548000000;
 
@@ -2718,7 +2716,7 @@ static int __init mipi_video_sharp_nt_720p_pt_init(void)
 #endif
 		pinfo.lcd.vsync_enable = TRUE;
 		pinfo.lcd.hw_vsync_mode = TRUE;
-		pinfo.lcd.refx100 = 6096; /* adjust refx100 to prevent tearing */
+		pinfo.lcd.refx100 = 6650; /* adjust refx100 to prevent tearing */
 		pinfo.mipi.te_sel = 1; /* TE from vsycn gpio */
 		pinfo.mipi.interleave_max = 1;
 		pinfo.mipi.insert_dcs_cmd = TRUE;
@@ -2770,7 +2768,6 @@ static int __init mipi_video_sharp_nt_720p_pt_init(void)
 	pinfo.bl_max = 255;
 	pinfo.bl_min = 1;
 	pinfo.fb_num = 2;
-	pinfo.lcd.blt_ctrl = 1;
 
 	pinfo.clk_rate = 569000000;
 
