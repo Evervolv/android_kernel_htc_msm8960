@@ -2,7 +2,7 @@
  *
  * MSM MDP Interface (used by framebuffer core)
  *
- * Copyright (c) 2007-2012, Code Aurora Forum. All rights reserved.
+ * Copyright (c) 2007-2013, The Linux Foundation. All rights reserved.
  * Copyright (C) 2007 Google Incorporated
  *
  * This software is licensed under the terms of the GNU General Public
@@ -52,7 +52,7 @@ static struct clk *mdp_lut_clk;
 int mdp_rev;
 u32 mdp_max_clk = 200000000;
 int mdp_iommu_split_domain;
-u64 mdp_max_bw = 2000000000;
+u64 mdp_max_bw = 2039040000;
 
 static struct platform_device *mdp_init_pdev;
 static struct regulator *footswitch, *hdmi_pll_fs;
@@ -913,12 +913,10 @@ int _mdp_histogram_ctrl(boolean en, struct mdp_hist_mgmt *mgmt)
 	int ret = 0;
 
 	mutex_lock(&mgmt->mdp_hist_mutex);
-	if (mgmt->mdp_is_hist_start == TRUE) {
-		if (en)
-			ret = mdp_histogram_enable(mgmt);
-		else
-			ret = mdp_histogram_disable(mgmt);
-	}
+	if (mgmt->mdp_is_hist_start && !mgmt->mdp_is_hist_data && en)
+		ret = mdp_histogram_enable(mgmt);
+	else if (mgmt->mdp_is_hist_data && !en)
+		ret = mdp_histogram_disable(mgmt);
 	mutex_unlock(&mgmt->mdp_hist_mutex);
 
 	if (en == false)
@@ -1016,7 +1014,6 @@ int mdp_histogram_stop(struct fb_info *info, uint32_t block)
 	mgmt->mdp_is_hist_start = FALSE;
 
 	if (!mfd->panel_power_on) {
-		mgmt->mdp_is_hist_data = FALSE;
 		if (mgmt->hist != NULL) {
 			mgmt->hist = NULL;
 			complete(&mgmt->mdp_hist_comp);
@@ -1270,7 +1267,7 @@ static int mdp_do_histogram(struct fb_info *info,
 		goto error;
 }
 	if ((mdp_rev <= MDP_REV_41 && hist->bin_cnt > MDP_REV41_HIST_MAX_BIN)
-		|| (mdp_rev == MDP_REV_42 &&
+		|| (mdp_rev >= MDP_REV_42 &&
 				hist->bin_cnt > MDP_REV42_HIST_MAX_BIN)) {
 		pr_info("%s - mdp_rev = %d, num_bins = %d", __func__, mdp_rev,
 								hist->bin_cnt);
@@ -1404,32 +1401,47 @@ int mdp_ppp_pipe_wait(void)
 
 u32 mdp_get_panel_framerate(struct msm_fb_data_type *mfd)
 {
-	u32 frame_rate = 0, total_pixel;
+	u32 frame_rate = 0, pixel_rate = 0, total_pixel;
 	struct msm_panel_info *panel_info = &mfd->panel_info;
+
+	pixel_rate =
+		(panel_info->type == MIPI_CMD_PANEL ||
+		 panel_info->type == MIPI_VIDEO_PANEL) ?
+		panel_info->mipi.dsi_pclk_rate :
+		panel_info->clk_rate;
+
+	if (!pixel_rate)
+		pr_warn("%s pixel rate is zero\n", __func__);
+
+	total_pixel =
+		(panel_info->lcdc.h_back_porch +
+		 panel_info->lcdc.h_front_porch +
+		 panel_info->lcdc.h_pulse_width +
+		 panel_info->xres) *
+		(panel_info->lcdc.v_back_porch +
+		 panel_info->lcdc.v_front_porch +
+		 panel_info->lcdc.v_pulse_width +
+		 panel_info->yres);
+
+	if (total_pixel)
+		frame_rate = pixel_rate / total_pixel;
+	else
+		pr_warn("%s total pixels are zero\n", __func__);
+
 	if (mfd->dest == DISPLAY_LCD) {
 		if (panel_info->type == MDDI_PANEL && panel_info->mddi.is_type1)
 			frame_rate = panel_info->lcd.refx100 / (100 * 2);
-		else
+		else if (panel_info->type != MIPI_CMD_PANEL)
 			frame_rate = panel_info->lcd.refx100 / 100;
-	} else {
-		if (panel_info->type == MIPI_VIDEO_PANEL) {
-			frame_rate = panel_info->mipi.frame_rate;
-		} else {
-			total_pixel = (panel_info->lcdc.h_back_porch +
-				  panel_info->lcdc.h_front_porch +
-				  panel_info->lcdc.h_pulse_width +
-				  panel_info->xres) *
-				 (panel_info->lcdc.v_back_porch +
-				  panel_info->lcdc.v_front_porch +
-				  panel_info->lcdc.v_pulse_width +
-				  panel_info->yres);
-			if (total_pixel)
-				frame_rate = panel_info->clk_rate /
-					total_pixel;
-		}
 	}
-	if (frame_rate == 0)
+
+	if (frame_rate == 0) {
 		frame_rate = DEFAULT_FRAME_RATE;
+		pr_warn("%s frame rate=%d is default\n", __func__, frame_rate);
+	}
+	pr_debug("%s frame rate=%d total_pixel=%d, pixel_rate=%d\n", __func__,
+		frame_rate, total_pixel, pixel_rate);
+
 	return frame_rate;
 }
 
@@ -1899,68 +1911,67 @@ irqreturn_t mdp_isr(int irq, void *ptr)
 {
 	uint32 mdp_interrupt = 0;
 	struct mdp_dma_data *dma;
-#ifndef CONFIG_FB_MSM_MDP22
 	struct mdp_hist_mgmt *mgmt = NULL;
 	int i, ret;
-#endif
 
 	/* Ensure all the register write are complete */
 	mb();
 
 	mdp_is_in_isr = TRUE;
-	do {
-		mdp_interrupt = inp32(MDP_INTR_STATUS);
-		outp32(MDP_INTR_CLEAR, mdp_interrupt);
+	
+	mdp_interrupt = inp32(MDP_INTR_STATUS);
+	outp32(MDP_INTR_CLEAR, mdp_interrupt);
 
-		mdp_interrupt &= mdp_intr_mask;
+	mdp_interrupt &= mdp_intr_mask;
 
-		if (mdp_interrupt & TV_ENC_UNDERRUN) {
-			mdp_interrupt &= ~(TV_ENC_UNDERRUN);
-			mdp_tv_underflow_cnt++;
-		}
+	if (mdp_interrupt & TV_ENC_UNDERRUN) {
+		mdp_interrupt &= ~(TV_ENC_UNDERRUN);
+		mdp_tv_underflow_cnt++;
+	}
 
-		if (!mdp_interrupt)
-			break;
+	if (!mdp_interrupt)
+		goto out;
 
 	/*Primary Vsync interrupt*/
 	if (mdp_interrupt & MDP_PRIM_RDPTR)
 		vsync_isr_handler();
 
-		/* DMA3 TV-Out Start */
-		if (mdp_interrupt & TV_OUT_DMA3_START) {
-			/* let's disable TV out interrupt */
-			mdp_intr_mask &= ~TV_OUT_DMA3_START;
-			outp32(MDP_INTR_ENABLE, mdp_intr_mask);
+	/* DMA3 TV-Out Start */
+	if (mdp_interrupt & TV_OUT_DMA3_START) {
+		/* let's disable TV out interrupt */
+		mdp_intr_mask &= ~TV_OUT_DMA3_START;
+		outp32(MDP_INTR_ENABLE, mdp_intr_mask);
 
-			dma = &dma3_data;
-			if (dma->waiting) {
-				dma->waiting = FALSE;
-				complete(&dma->comp);
+		dma = &dma3_data;
+		if (dma->waiting) {
+			dma->waiting = FALSE;
+			complete(&dma->comp);
+		}
+	}
+
+	if (mdp_rev >= MDP_REV_30) {
+		/* Only DMA_P histogram exists for this MDP rev*/
+		if (mdp_interrupt & MDP_HIST_DONE) {
+			ret = mdp_histogram_block2mgmt(MDP_BLOCK_DMA_P, &mgmt);
+			if (!ret)
+				mdp_histogram_handle_isr(mgmt);
+			outp32(MDP_INTR_CLEAR, MDP_HIST_DONE);
+		}
+
+		/* LCDC UnderFlow */
+		if (mdp_interrupt & LCDC_UNDERFLOW) {
+			mdp_lcdc_underflow_cnt++;
+			/*when underflow happens HW resets all the histogram
+			  registers that were set before so restore them back
+			  to normal.*/
+			for (i = 0; i < MDP_HIST_MGMT_MAX; i++) {
+				mgmt = mdp_hist_mgmt_array[i];
+				if (!mgmt)
+					continue;
+
+				mgmt->mdp_is_hist_valid = FALSE;
 			}
 		}
-#ifndef CONFIG_FB_MSM_MDP22
-	/* Only DMA_P histogram exists for this MDP rev*/
-	if (mdp_interrupt & MDP_HIST_DONE) {
-		ret = mdp_histogram_block2mgmt(MDP_BLOCK_DMA_P, &mgmt);
-		if (!ret)
-			mdp_histogram_handle_isr(mgmt);
-		outp32(MDP_INTR_CLEAR, MDP_HIST_DONE);
-	}
-
-	/* LCDC UnderFlow */
-	if (mdp_interrupt & LCDC_UNDERFLOW) {
-		mdp_lcdc_underflow_cnt++;
-		/*when underflow happens HW resets all the histogram
-		  registers that were set before so restore them back
-		  to normal.*/
-		for (i = 0; i < MDP_HIST_MGMT_MAX; i++) {
-			mgmt = mdp_hist_mgmt_array[i];
-			if (!mgmt)
-				continue;
-
-			mgmt->mdp_is_hist_valid = FALSE;
-		}
-	}
 
 		/* LCDC Frame Start */
 		if (mdp_interrupt & LCDC_FRAME_START) {
@@ -1995,50 +2006,47 @@ irqreturn_t mdp_isr(int irq, void *ptr)
 				TRUE);
 			complete(&dma->comp);
 		}
+	}
 
-#endif
+	/* DMA2 LCD-Out Complete */
+	if (mdp_interrupt & MDP_DMA_P_DONE) {
+		struct timeval now;
 
-		/* DMA2 LCD-Out Complete */
-		if (mdp_interrupt & MDP_DMA_P_DONE) {
-			struct timeval now;
-
-			mdp_dma2_last_update_time = ktime_sub(ktime_get_real(),
-				mdp_dma2_last_update_time);
-			if (mdp_debug[MDP_DMA2_BLOCK]) {
-				jiffies_to_timeval(jiffies, &now);
-				mdp_dma2_timeval.tv_usec =
-				    now.tv_usec - mdp_dma2_timeval.tv_usec;
-			}
+		mdp_dma2_last_update_time = ktime_sub(ktime_get_real(),
+			mdp_dma2_last_update_time);
+		if (mdp_debug[MDP_DMA2_BLOCK]) {
+			jiffies_to_timeval(jiffies, &now);
+			mdp_dma2_timeval.tv_usec =
+			    now.tv_usec - mdp_dma2_timeval.tv_usec;
+		}
 #ifndef CONFIG_FB_MSM_MDP303
+		dma = &dma2_data;
+		dma->busy = FALSE;
+		mdp_pipe_ctrl(MDP_DMA2_BLOCK, MDP_BLOCK_POWER_OFF,
+			      TRUE);
+		complete(&dma->comp);
+#else
+		if (mdp_prim_panel_type == MIPI_CMD_PANEL) {
 			dma = &dma2_data;
 			spin_lock_irqsave(&mdp_spin_lock, flag);
 			dma->busy = FALSE;
-			spin_unlock_irqrestore(&mdp_spin_lock, flag);
-			mdp_pipe_ctrl(MDP_DMA2_BLOCK, MDP_BLOCK_POWER_OFF,
-				TRUE);
+			mdp_pipe_ctrl(MDP_DMA2_BLOCK,
+				MDP_BLOCK_POWER_OFF, TRUE);
 			complete(&dma->comp);
-#else
-			if (mdp_prim_panel_type == MIPI_CMD_PANEL) {
-				dma = &dma2_data;
-				dma->busy = FALSE;
-				mdp_pipe_ctrl(MDP_DMA2_BLOCK,
-					MDP_BLOCK_POWER_OFF, TRUE);
-				complete(&dma->comp);
-			}
-#endif
 		}
-		/* PPP Complete */
-		if (mdp_interrupt & MDP_PPP_DONE) {
+#endif
+	}
+	/* PPP Complete */
+	if (mdp_interrupt & MDP_PPP_DONE) {
 #ifdef	CONFIG_FB_MSM_MDP31
-			MDP_OUTP(MDP_BASE + 0x00100, 0xFFFF);
+		MDP_OUTP(MDP_BASE + 0x00100, 0xFFFF);
 #endif
-			mdp_pipe_ctrl(MDP_PPP_BLOCK, MDP_BLOCK_POWER_OFF, TRUE);
-			if (mdp_ppp_waiting) {
-				mdp_ppp_waiting = FALSE;
-				complete(&mdp_ppp_comp);
-			}
+		mdp_pipe_ctrl(MDP_PPP_BLOCK, MDP_BLOCK_POWER_OFF, TRUE);
+		if (mdp_ppp_waiting) {
+			mdp_ppp_waiting = FALSE;
+			complete(&mdp_ppp_comp);
 		}
-	} while (1);
+	}
 
 	mdp_is_in_isr = FALSE;
 
@@ -2378,7 +2386,7 @@ int mdp_bus_scale_update_request(u64 ab, u64 ib)
 	ib = max(ib, ab);
 	mdp_bus_usecases[bus_index].vectors->ib = min(ib, mdp_max_bw);
 
-	pr_debug("%s: handle=%d index=%d ab=%llu ib=%llu\n", __func__,
+	pr_info("%s: handle=%d index=%d ab=%d ib=%d\n", __func__,
 		 (u32)mdp_bus_scale_handle, bus_index,
 		 mdp_bus_usecases[bus_index].vectors->ab,
 		 mdp_bus_usecases[bus_index].vectors->ib);
@@ -2458,7 +2466,7 @@ static int mdp_irq_clk_setup(struct platform_device *pdev,
 		regulator_enable(footswitch);
 		mdp_footswitch_on = 1;
 
-		if (mdp_rev == MDP_REV_42 && !cont_splashScreen) {
+		if (mdp_rev >= MDP_REV_42 && !cont_splashScreen) {
 			regulator_disable(footswitch);
 			msleep(20);
 			regulator_enable(footswitch);
@@ -2479,7 +2487,7 @@ static int mdp_irq_clk_setup(struct platform_device *pdev,
 	if (IS_ERR(mdp_pclk))
 		mdp_pclk = NULL;
 
-	if (mdp_rev == MDP_REV_42) {
+	if (mdp_rev >= MDP_REV_42) {
 		mdp_lut_clk = clk_get(&pdev->dev, "lut_clk");
 		if (IS_ERR(mdp_lut_clk)) {
 			ret = PTR_ERR(mdp_lut_clk);
@@ -2691,6 +2699,8 @@ static int mdp_probe(struct platform_device *pdev)
 			mfd->dma = &dma2_data;
 			mfd->lut_update = mdp_lut_update_nonlcdc;
 			mfd->do_histogram = mdp_do_histogram;
+			mfd->start_histogram = mdp_histogram_start;
+			mfd->stop_histogram = mdp_histogram_stop;
 		} else {
 			mfd->dma_fnc = mdp_dma_s_update;
 			mfd->dma = &dma_s_data;
@@ -2738,6 +2748,8 @@ static int mdp_probe(struct platform_device *pdev)
 		mfd->dma_fnc = mdp4_dsi_video_overlay;
 		mfd->lut_update = mdp_lut_update_lcdc;
 		mfd->do_histogram = mdp_do_histogram;
+		mfd->start_histogram = mdp_histogram_start;
+		mfd->stop_histogram = mdp_histogram_stop;
 		if (mfd->panel_info.pdest == DISPLAY_1) {
 			if_no = PRIMARY_INTF_SEL;
 			mfd->dma = &dma2_data;
@@ -2752,6 +2764,8 @@ static int mdp_probe(struct platform_device *pdev)
 		mfd->hw_refresh = TRUE;
 		mfd->dma_fnc = mdp_dsi_video_update;
 		mfd->do_histogram = mdp_do_histogram;
+		mfd->start_histogram = mdp_histogram_start;
+		mfd->stop_histogram = mdp_histogram_stop;
 		mfd->vsync_ctrl = mdp_dma_video_vsync_ctrl;
 		if (mfd->panel_info.pdest == DISPLAY_1)
 			mfd->dma = &dma2_data;
@@ -2784,10 +2798,14 @@ static int mdp_probe(struct platform_device *pdev)
 		}
 		mfd->lut_update = mdp_lut_update_nonlcdc;
 		mfd->do_histogram = mdp_do_histogram;
+		mfd->start_histogram = mdp_histogram_start;
+		mfd->stop_histogram = mdp_histogram_stop;
 		mdp4_display_intf_sel(if_no, DSI_CMD_INTF);
 #else
 		mfd->dma_fnc = mdp_dma2_update;
 		mfd->do_histogram = mdp_do_histogram;
+		mfd->start_histogram = mdp_histogram_start;
+		mfd->stop_histogram = mdp_histogram_stop;
 		mfd->vsync_ctrl = mdp_dma_vsync_ctrl;
 		if (mfd->panel_info.pdest == DISPLAY_1)
 			mfd->dma = &dma2_data;
@@ -2814,6 +2832,9 @@ static int mdp_probe(struct platform_device *pdev)
 		mfd->cursor_update = mdp_hw_cursor_update;
 		mfd->dma_fnc = mdp4_dtv_overlay;
 		mfd->dma = &dma_e_data;
+		mfd->do_histogram = mdp_do_histogram;
+		mfd->start_histogram = mdp_histogram_start;
+		mfd->stop_histogram = mdp_histogram_stop;
 		mdp4_display_intf_sel(EXTERNAL_INTF_SEL, DTV_INTF);
 		break;
 #endif
@@ -2833,6 +2854,8 @@ static int mdp_probe(struct platform_device *pdev)
 #ifndef CONFIG_FB_MSM_MDP22
 		mfd->lut_update = mdp_lut_update_lcdc;
 		mfd->do_histogram = mdp_do_histogram;
+		mfd->start_histogram = mdp_histogram_start;
+		mfd->stop_histogram = mdp_histogram_stop;
 #endif
 #ifdef CONFIG_FB_MSM_OVERLAY
 		mfd->dma_fnc = mdp4_lcdc_overlay;

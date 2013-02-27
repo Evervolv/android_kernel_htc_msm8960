@@ -59,6 +59,7 @@ struct platform_device;
 struct kgsl_device_private;
 struct kgsl_context;
 struct kgsl_power_stats;
+struct kgsl_event;
 
 struct kgsl_functable {
 	/* Mandatory functions - these functions must be implemented
@@ -112,6 +113,8 @@ struct kgsl_functable {
 	int (*setproperty) (struct kgsl_device *device,
 		enum kgsl_property_type type, void *value,
 		unsigned int sizebytes);
+	void (*next_event)(struct kgsl_device *device,
+		struct kgsl_event *event);
 };
 
 /* MH register values */
@@ -160,7 +163,6 @@ struct kgsl_device {
 	uint32_t state;
 	uint32_t requested_state;
 
-	unsigned int last_expired_ctxt_id;
 	unsigned int active_cnt;
 	struct completion suspend_gate;
 
@@ -219,8 +221,7 @@ void kgsl_timestamp_expired(struct work_struct *work);
 	.mutex = __MUTEX_INITIALIZER((_dev).mutex),\
 	.state = KGSL_STATE_INIT,\
 	.ver_major = DRIVER_VERSION_MAJOR,\
-	.ver_minor = DRIVER_VERSION_MINOR,\
-	.last_expired_ctxt_id = KGSL_CONTEXT_INVALID
+	.ver_minor = DRIVER_VERSION_MINOR
 
 struct kgsl_context {
 	struct kref refcount;

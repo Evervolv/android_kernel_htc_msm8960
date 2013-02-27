@@ -1884,7 +1884,7 @@ static void fighter_set_backlight(struct msm_fb_data_type *mfd)
 
 	led_pwm1[1] = fighter_shrink_pwm(mfd->bl_level);
 
-	mipi_dsi_mdp_busy_wait(mfd);
+	mipi_dsi_mdp_busy_wait();
 
 	mipi_dsi_cmds_tx(&fighter_panel_tx_buf, novatek_cmd_backlight_cmds,
 			ARRAY_SIZE(novatek_cmd_backlight_cmds));
@@ -2029,6 +2029,7 @@ static int mipi_cmd_novatek_blue_qhd_pt_init(void)
 	pinfo.bl_max = 255;
 	pinfo.bl_min = 1;
 	pinfo.fb_num = 2;
+	pinfo.lcd.blt_ctrl = 1;
 	pinfo.clk_rate = 482000000;
 	pinfo.lcd.vsync_enable = TRUE;
 	pinfo.lcd.hw_vsync_mode = TRUE;

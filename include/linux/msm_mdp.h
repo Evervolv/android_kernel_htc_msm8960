@@ -1,7 +1,7 @@
 /* include/linux/msm_mdp.h
  *
  * Copyright (C) 2007 Google Incorporated
- * Copyright (c) 2012 Code Aurora Forum. All rights reserved.
+ * Copyright (c) 2012-2013 The Linux Foundation. All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -74,7 +74,9 @@
 #define MSMFB_BUFFER_SYNC  _IOW(MSMFB_IOCTL_MAGIC, 162, struct mdp_buf_sync)
 #define MSMFB_DISPLAY_COMMIT      _IOW(MSMFB_IOCTL_MAGIC, 164, \
 						struct mdp_display_commit)
+#define MSMFB_METADATA_GET  _IOW(MSMFB_IOCTL_MAGIC, 166, struct msmfb_metadata)
 
+#define MSMFB_METADATA_SET  _IOW(MSMFB_IOCTL_MAGIC, 163, struct msmfb_metadata)
 #define FB_TYPE_3D_PANEL 0x10101010
 #define MDP_IMGTYPE2_START 0x10000
 #define MSMFB_DRIVER_VERSION	0xF9E8D701
@@ -139,6 +141,7 @@ enum {
 #define MDP_DITHER 0x8
 #define MDP_BLUR 0x10
 #define MDP_BLEND_FG_PREMULT 0x20000
+#define MDP_IS_FG 0x40000
 #define MDP_DEINTERLACE 0x80000000
 #define MDP_SHARPENING  0x40000000
 #define MDP_NO_DMA_BARRIER_START	0x20000000
@@ -271,8 +274,10 @@ struct msmfb_writeback_data {
 	struct msmfb_img img;
 };
 
+#define MDP_PP_OPS_ENABLE 0x1
 #define MDP_PP_OPS_READ 0x2
 #define MDP_PP_OPS_WRITE 0x4
+#define MDP_PP_OPS_DISABLE 0x8
 
 struct mdp_qseed_cfg {
 	uint32_t table_num;
@@ -354,11 +359,14 @@ struct mdp_histogram {
 
 /*
 
-	mdp_block_type defines the identifiers for each of pipes in MDP 4.3
+	mdp_block_type defines the identifiers for pipes in MDP 4.3 and up
 
 	MDP_BLOCK_RESERVED is provided for backward compatibility and is
 	deprecated. It corresponds to DMA_P. So MDP_BLOCK_DMA_P should be used
 	instead.
+
+	MDP_LOGICAL_BLOCK_DISP_0 identifies the display pipe which fb0 uses,
+	same for others.
 
 */
 
@@ -374,13 +382,16 @@ enum {
 	MDP_BLOCK_DMA_S,
 	MDP_BLOCK_DMA_E,
 	MDP_BLOCK_OVERLAY_2,
+	MDP_LOGICAL_BLOCK_DISP_0 = 0x1000,
+	MDP_LOGICAL_BLOCK_DISP_1,
+	MDP_LOGICAL_BLOCK_DISP_2,
 	MDP_BLOCK_MAX,
 };
 
 /*
-mdp_histogram_start_req is used to provide the parameters for
-histogram start request
-*/
+ * mdp_histogram_start_req is used to provide the parameters for
+ *histogram start request
+ */
 
 struct mdp_histogram_start_req {
 	uint32_t block;
@@ -391,10 +402,8 @@ struct mdp_histogram_start_req {
 
 
 /*
-
-   mdp_histogram_data is used to return the histogram data, once
-   the histogram is done/stopped/cance
-
+ * mdp_histogram_data is used to return the histogram data, once
+ * the histogram is done/stopped/cance
  */
 
 
@@ -490,6 +499,25 @@ struct msmfb_mdp_pp {
 	} data;
 };
 
+enum {
+	metadata_op_none,
+	metadata_op_base_blend,
+	metadata_op_frame_rate,
+	metadata_op_max
+};
+
+struct mdp_blend_cfg {
+	uint32_t is_premultiplied;
+};
+
+struct msmfb_metadata {
+	uint32_t op;
+	uint32_t flags;
+	union {
+		struct mdp_blend_cfg blend_cfg;
+		uint32_t panel_frame_rate;
+	} data;
+};
 
 #define MDP_MAX_FENCE_FD	10
 #define MDP_BUF_SYNC_FLAG_WAIT	1
